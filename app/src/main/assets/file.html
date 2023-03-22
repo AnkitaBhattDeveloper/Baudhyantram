@@ -1,14 +1,28 @@
 <html>
-<body><!--
-First name: <input type="text" name="firstName" id="txtFirstName"><br>
-Last name: <input type="text" name="lastName" id="txtLastName"><br>-->
-<script>
-   function getValues() {
-      document.getElementById("btnOK").value =
-      document.getElementById("txtFirstName").value+"
-      "+document.getElementById("txtLastName").value;
-   }
-</script>
-<input type="file" value="" id="form-field-field_b444465" onclick=" getValues();ok.performClick(this.value); ">S
+<!--<body bgcolor="red">-->
+<center>
+    <br/>
+    <input type="file" name="form_fields[field_b444465]" id="form-field-field_b444465" class="elementor-field elementor-size-sm">
+    <br/>
+
+    <input id="btn" type="button" value="click me" onclick="msg();"/>
+    <br>
+    <br/>
+    <button onclick="msg();">onclick</button>
+</center>
 </body>
+<script>
+      function msg(){
+
+          var fname=document.getElementById("btn");
+         // var pswd=document.getElementById("pswd").value;
+            console.log("")
+            fname.bgcolor='red';
+          // Dialog is javascript interface name
+          // mentioned in Mainactivity.Java
+          Bridge.showMsg(fname);
+          }
+
+
+   </script>
 </html>

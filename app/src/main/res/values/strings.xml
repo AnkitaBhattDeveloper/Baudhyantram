@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Baudhyantram</string>
+    <string name="image_choose">File Chooser</string>
 </resources>

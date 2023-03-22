@@ -1,6 +1,5 @@
 package com.baudhyantram.baudhyantram.activites
 
-import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -9,29 +8,45 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import android.view.View
-import android.webkit.ValueCallback
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
+import android.widget.Toast
+import androidx.activity.result.ActivityResult
+import androidx.activity.result.ActivityResultCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import com.baudhyantram.baudhyantram.R
 import com.baudhyantram.baudhyantram.constant.App
 import com.baudhyantram.baudhyantram.databinding.ActivityMainBinding
 import com.google.android.play.core.appupdate.AppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
 import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.UpdateAvailability
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.io.File
+import java.io.IOException
 
 
 class MainActivity : AppCompatActivity() {
     lateinit var binding: ActivityMainBinding
     lateinit var context: Context
-
-    //val webUrl: String = "https://jansath.com/"
     var current_url: String = App.URL
-    private var mUploadMessage: ValueCallback<Uri>? = null
+    var imgUri: Uri? = null
 
     private val appUpdateManager: AppUpdateManager by lazy { AppUpdateManagerFactory.create(this) }
+
+    private val FILECHOOSER_RESULTCODE = 1
+    private var mUploadMessage: ValueCallback<Uri>? = null
+    private var mCapturedImageURI: Uri? = null
+
+    // the same for Android 5.0 methods only
+    private var mFilePathCallback: ValueCallback<Array<Uri>>? = null
+    private var mCameraPhotoPath: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,26 +55,25 @@ class MainActivity : AppCompatActivity() {
         supportActionBar?.hide()
         context = this
 
-        UpdateApp()
+        CoroutineScope(Dispatchers.IO).launch {
+            UpdateApp()
+        }
+
 
 
         binding.swipeRefresh.setOnRefreshListener {
             showProgressBar()
-            bindWeb(current_url)
+            CoroutineScope(Dispatchers.IO).launch {
+                bindWeb(current_url)
+            }
+
             binding.swipeRefresh.isRefreshing = false
         }
 
         bindWeb(App.URL)
-       /* binding.webView.setOnTouchListener { v, event ->
-            binding.webView.performClick()
-            val hr = (v as WebView).hitTestResult
-            Log.e("TAG", "onCreate: touch event listerner $hr ")
-            false
-        }*/
-
     }
 
-    @SuppressLint("JavascriptInterface")
+
     fun bindWeb(webUrl: String) {
         var loadingFinished = true;
         var redirect = false;
@@ -74,12 +88,6 @@ class MainActivity : AppCompatActivity() {
                 settings.safeBrowsingEnabled = true  // api 26
             }
 
-            /*   //loadUrl("file:///android_asset/file.html")
-               addJavascriptInterface(object : Any() {
-                   fun performClick(string: String) {
-                       Log.e("TAG", "performClick: $string")
-                   }
-               }, "OK")*/
 
         }
         binding.webView.webViewClient = object : WebViewClient() {
@@ -106,15 +114,12 @@ class MainActivity : AppCompatActivity() {
                         isPackageInstalled("com.whatsapp", context, url)
                     else if (url.contains("https://twitter.com/"))
                         isPackageInstalled("com.twitter.android", context, url)
+
                     else
                         view?.loadUrl(url)
 
 
                 }
-                 if (url.contains("https://baudhyantram.com/index.php/course-registration/")) {
-                      binding.webView.addJavascriptInterface(JSBridge,"Bridge")
-                  }
-
                 return true
 
             }
@@ -125,30 +130,188 @@ class MainActivity : AppCompatActivity() {
                 val uri = Uri.parse(current_url)
                 Log.e("TAG", "onPageStarted:task id = ${taskId} ")
 
-                /*  if ((current_url).contains("tel:")) {
-                      Log.e("TAG", "shouldOverrideUrlLoading: current url $current_url ")
-                      val intent = Intent(Intent.ACTION_VIEW)
-                      intent.data = Uri.parse(current_url)
-                      startActivity(intent)
-                      //finish()
-                  } else
-                      showProgressBar()
-  */
-
                 Log.e("TAG", "onPageStarted:$current_url ")
                 Log.e("TAG", "isPackageInstalled: ${uri.path}")
+
+
                 super.onPageStarted(view, url, favicon)
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 hideProgressBar()
-                injectJavaScript(view)
+                /*if (current_url.contains("https://baudhyantram.com/index.php/course-registration/")) {
+                    view?.addJavascriptInterface(
+                        showMsg("JavaScriptBridge"),
+                        "Bridge"
+                    )
+                    view?.loadUrl("file:///android_asset/file.html")
+                }*/
                 super.onPageFinished(view, url)
             }
 
         }
 
+
+
+
+
+
+
+
+        binding.webView.webChromeClient = object : WebChromeClient() {
+            @Deprecated("Deprecated in Java")
+
+
+            override// for Lollipop, all in one
+            fun onShowFileChooser(
+                webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: WebChromeClient.FileChooserParams?
+            ): Boolean {
+                mFilePathCallback?.onReceiveValue(null)
+                mFilePathCallback = filePathCallback
+                var takePictureIntent: Intent? = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                if (takePictureIntent!!.resolveActivity(packageManager) != null) {
+
+                    // create the file where the photo should go
+                    var photoFile: File? = null
+                    try {
+                        photoFile = createImageFile()
+                        takePictureIntent!!.putExtra("PhotoPath", mCameraPhotoPath)
+                    } catch (ex: IOException) {
+                        // Error occurred while creating the File
+                        Log.e("TAG", "Unable to create Image File", ex)
+                    }
+
+                    // continue only if the file was successfully created
+                    if (photoFile != null) {
+                        mCameraPhotoPath = "file:" + photoFile!!.getAbsolutePath()
+                        takePictureIntent!!.putExtra(
+                            MediaStore.EXTRA_OUTPUT,
+                            Uri.fromFile(photoFile)
+                        )
+                    } else {
+                        takePictureIntent = null
+                    }
+                }
+                val contentSelectionIntent = Intent(Intent.ACTION_GET_CONTENT)
+                contentSelectionIntent.addCategory(Intent.CATEGORY_OPENABLE)
+                contentSelectionIntent.type = "*/*"
+                val intentArray: Array<Intent?> =
+                    takePictureIntent?.let { arrayOf(it) } ?: arrayOfNulls(0)
+                val chooserIntent = Intent(Intent.ACTION_CHOOSER)
+                chooserIntent.putExtra(Intent.EXTRA_INTENT, contentSelectionIntent)
+                chooserIntent.putExtra(Intent.EXTRA_TITLE, getString(R.string.image_choose))
+                chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, intentArray)
+                startActivityForResult(chooserIntent, FILECHOOSER_RESULTCODE)
+                return true
+            }
+
+            // creating image files (Lollipop only)
+            @Throws(IOException::class)
+            private fun createImageFile(): File? {
+                var imageStorageDir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                    "DirectoryNameHere"
+                )
+                if (!imageStorageDir.exists()) {
+                    imageStorageDir.mkdirs()
+                }
+
+                // create an image file name
+                imageStorageDir = File(
+                    (File.separator + imageStorageDir).toString() + "IMG_" + System.currentTimeMillis()
+                        .toString() + ".jpg"
+                )
+                return imageStorageDir
+            }
+
+            // openFileChooser for Android 3.0+
+            fun openFileChooser(uploadMsg: ValueCallback<Uri>?, acceptType: String?) {
+                mUploadMessage = uploadMsg
+                try {
+                    val imageStorageDir = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                        "DirectoryNameHere"
+                    )
+                    if (!imageStorageDir.exists()) {
+                        imageStorageDir.mkdirs()
+                    }
+                    val file = File(
+                        (File.separator + imageStorageDir).toString() + "IMG_" + System.currentTimeMillis()
+                            .toString() + ".jpg"
+                    )
+                    mCapturedImageURI = Uri.fromFile(file) // save to the private variable
+                    val captureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                    captureIntent.putExtra(MediaStore.EXTRA_OUTPUT, mCapturedImageURI)
+                    // captureIntent.putExtra(MediaStore.EXTRA_SCREEN_ORIENTATION, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                    val i = Intent(Intent.ACTION_GET_CONTENT)
+                    i.addCategory(Intent.CATEGORY_OPENABLE)
+                    i.type = "*/*"
+                    val chooserIntent = Intent.createChooser(i, getString(R.string.image_choose))
+                    chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(captureIntent))
+                    startActivityForResult(chooserIntent, FILECHOOSER_RESULTCODE)
+                } catch (e: Exception) {
+                    Toast.makeText(baseContext, "Camera Exception:$e", Toast.LENGTH_LONG).show()
+                }
+            }
+
+            // openFileChooser for Android < 3.0
+            fun openFileChooser(uploadMsg: ValueCallback<Uri>?) {
+                openFileChooser(uploadMsg, "")
+            }
+
+            // openFileChooser for other Android versions
+            /* may not work on KitKat due to lack of implementation of openFileChooser() or onShowFileChooser()
+               https://code.google.com/p/android/issues/detail?id=62220
+               however newer versions of KitKat fixed it on some devices */
+            fun openFileChooser(
+                uploadMsg: ValueCallback<Uri>?,
+                acceptType: String?,
+                capture: String?
+            ) {
+                openFileChooser(uploadMsg, acceptType)
+            }
+
+        }
+
+
     }
+
+
+
+    // return here when file selected from camera or from SD Card
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+
+        // code for all versions except of Lollipop
+        // end of code for all versions except of Lollipop
+
+        // start of code for Lollipop only
+        if (requestCode != FILECHOOSER_RESULTCODE || mFilePathCallback == null) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        var results: Array<Uri>? = null
+
+        // check that the response is a good one
+        if (resultCode == RESULT_OK) {
+            if (data == null || data.data == null) {
+                // if there is not data, then we may have taken a photo
+                if (mCameraPhotoPath != null) {
+                    results = arrayOf(Uri.parse(mCameraPhotoPath))
+                }
+            } else {
+                val dataString = data.dataString
+                if (dataString != null) {
+                    results = arrayOf(Uri.parse(dataString))
+                }
+            }
+        }
+        mFilePathCallback!!.onReceiveValue(results)
+        mFilePathCallback = null
+        // end of code for Lollipop only
+    }
+
 
     override fun onBackPressed() {
         if (binding.webView.canGoBack())
@@ -220,53 +383,6 @@ class MainActivity : AppCompatActivity() {
 
         }
     }
-
-/*  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-      super.onActivityResult(requestCode, resultCode, data)
-      if (resultCode == App.UPDATE_RESULT_CODE)
-          finish()
-  }*/
-
-
-    fun onFormResubmission(
-        view: WebView?,
-        dontResend: String,
-        resend: String
-    ) {
-
-        Log.e("TAG", "onFormResubmission: ${view?.contentDescription}")
-        val path = Uri.parse(view?.loadUrl(App.URL).toString())
-        Log.e("TAG", "onFormResubmission:path  ${path}")
-        Log.e("TAG", "onFormResubmission: dont resend ${dontResend}")
-        val i = Intent(Intent.ACTION_GET_CONTENT)
-        Log.e("TAG", "onFormResubmission: resend ${resend}")
-        i.addCategory(Intent.CATEGORY_OPENABLE)
-        i.type = "text/*"
-        Log.e("TAG", "onFormResubmission: ${i.data.toString()}")
-        startActivityForResult(Intent.createChooser(i, "Choose File"), 1)
-    }
-
-    private fun injectJavaScript(view: WebView?)
-    {
-        Log.e("TAG", "injectJavaScript: ", )
-       /* view!!.loadUrl("""
-            javascript:(function(){
-            let btUploadPhoto = document.querySelector(".random");
-            btUploadPhoto.addEventListener("click",function(){})
-            Bridge.calledFromJS();
-          
-            })
-            })()
-        """)*/
-    }
-
-
-object JSBridge{
-    fun calledFromJS()
-    {
-        Log.e("TAG", "calledFromJS: ", )
-    }
-}
 
 
 }
